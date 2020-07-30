@@ -12,7 +12,7 @@ function layers = LOO(layers,Misfit,TOL,pTOL,tolType,p)
 %   pTOL    - percent allowed change in misfit, if used
 %   tolType - 'iterative', 'total', 'absolute', 'and', or 'or'; see
 %               LayerOptimizer options for more details
-%   p       - boolean for whether to plot misfits
+%   p       - plots misfits if greater than 2
 
 base = Misfit(layers);
 if strcmp(tolType,'iterative') || strcmp(tolType,'total')
@@ -36,7 +36,7 @@ while 1 % loop condition not actually necessary; breaks inside
     for i = 1:Nc
         misfits(i) = Misfit(layers([1:i-1,i+1:Nc+i-1,Nc+i+1:end]));
     end
-    if p && Nc == N % if first iteration, plot initial misfits
+    if p > 2 && Nc == N % if first iteration, plot initial misfits
         figure, plot(sort(misfits)), hold on;
         yline(base,'--k'); yline(TOL,'--r');
         legend('Misfit','Original Misfit','Tolerance','location','NorthWest');
@@ -44,7 +44,7 @@ while 1 % loop condition not actually necessary; breaks inside
     end
     
     if ~any(misfits <= TOL) % if jump in misfit is too great, exit
-        if p % plot final misfits
+        if p > 2 % plot final misfits
             figure, plot(sort(misfits)), hold on;
             yline(base,'--k'); yline(TOL,'--r');
             legend('Misfit','Original Misfit','Tolerance','location','NorthWest');

@@ -16,7 +16,7 @@ function layers = AOI(layers,Misfit,TOL,pTOL,tolType,UB,options,p)
 %   UB      - upper bound vector used in PSO, just need first and last
 %               elements
 %   options - PSO options
-%   p       - boolean for whether to plot misfits
+%   p       - plots misfits if greater than 2
 
 bottom = UB(1); maxRes = UB(end);
 
@@ -34,7 +34,7 @@ while 1 % loop condition not actually necessary; breaks inside
     
     misfits = [];
     if base <= TOL
-        if p && ~isempty(misfits) % plot final misfits
+        if p > 2 && ~isempty(misfits) % plot final misfits
             figure, plot(misfits), hold on;
             yline(base,'--k'); yline(TOL,'--r');
             legend('Misfit','Original Misfit','Tolerance','location','NorthWest');
@@ -70,7 +70,7 @@ while 1 % loop condition not actually necessary; breaks inside
         extraLayers(i,2) = extraLayer(2);
         misfits(i) = Misfit(layersTemp);
     end
-    if p && Nc == N % if first iteration, plot initial misfits
+    if p > 2 && Nc == N % if first iteration, plot initial misfits
         figure, plot(misfits), hold on;
         yline(base,'--k'); yline(TOL,'--r');
         legend('Misfit','Original Misfit','Tolerance','location','NorthWest');
@@ -78,7 +78,7 @@ while 1 % loop condition not actually necessary; breaks inside
     end
     
     if all(misfits > TOL) % if jump in misfit is too small, exit
-        if p % plot final misfits
+        if p > 2% plot final misfits
             figure, plot(misfits), hold on;
             yline(base,'--k'); yline(TOL,'--r');
             legend('Misfit','Original Misfit','Tolerance','location','NorthWest');
