@@ -8,32 +8,36 @@ close all
 rng(0);
 
 %% Load dataset
-load('CPT40True.mat');
+load('cpt-data-Netherlands\CPT40True.mat'); % to be replaced
 obs = [CPT40True.zd,CPT40True.qcMeas]; % observed soil resistances
 trueProfile = CPT40True.qcTrue; % true resistance profile
+M = length(trueProfile);
 
 %% Setup
-kern = normpdf(linspace(-3,3,65)); % use a basic bell curve for the psf
+% kern = normpdf(linspace(-3,3,65)); % use a basic bell curve for the psf
+kern = chi2pdf(linspace(0,8,65),4); % use chi2 curve for asymmetry
 kern = kern/sum(kern);
-N = 14; % initial number of layers
-options = {'ConvTol',1e-3;'Plt',0};
+MAX = 5;
+options = {'ConvTol',1e-3;'Plt',0;'MAX',MAX};
 
 % !temporary! force blur to match psf type for demo purposes only
-mask = eye(size(obs,1));
+mask = eye(size(obs,1)); n = 0; z = 0;
 mask = [zeros(size(obs,1),floor(length(kern)/2)),mask,zeros(size(obs,1),ceil(length(kern)/2)-1)];
-obs(:,2) = mask*conv(trueProfile,kern);
+mask = diag([zeros(1,z),linspace(0,1,n),ones(1,M-n-z)].*[ones(1,M-n-z),linspace(1,0,n),zeros(1,z)])*mask;
+blur = @(layers) mask*conv(layers,kern);
+obs(:,2) = blur(trueProfile);
 
 %% Optimize
-[layers,info] = LayerOptimizer(N,obs,kern,options);
+[layers,info] = LayerOptimizer(obs,blur,options);
 
 %% Plot
 zd = CPT40True.zd;
 
 layers0 = info.layers0;
+Ni = info.Ninitial;
 Nf = info.Nfinal;
 IM = info.InitialMisfit;
 FM = info.FinalMisfit;
-mask = info.mask;
 
 fprintf('Initial Misfit: %f\n',IM);
 fprintf('Final Misfit: %f\n',FM);
@@ -41,13 +45,15 @@ fprintf('Final Misfit: %f\n',FM);
 figure
 subplot(1,2,1);
 t0 = LayerModelEval(layers0,zd);
-plot(t0,-zd,'-r'), hold on, plot(layers0(N+1:2*N),-layers0(1:N),'or'), plot(mask*conv(t0,kern),-zd,'--r');
+plot(t0,-zd,'-r'), hold on, plot(layers0(Ni+1:2*Ni),-layers0(1:Ni),'or'), plot(blur(t0),-zd,'--r');
 plot(obs(:,2),-zd,'--b'), plot(trueProfile,-zd,'-b'), hold off;
 legend('Inverse Model','','Blur of Model','Observed','True');
-title(N+" Layers, Initial Model");
+title(Ni+" Layers, Initial Model");
+xlim([0,MAX]);
 subplot(1,2,2);
 t = LayerModelEval(layers,zd);
-plot(t,-zd,'-r'), hold on, plot(layers(Nf+1:2*Nf),-layers(1:Nf),'or'), plot(mask*conv(t,kern),-zd,'--r');
+plot(t,-zd,'-r'), hold on, plot(layers(Nf+1:2*Nf),-layers(1:Nf),'or'), plot(blur(t),-zd,'--r');
 plot(obs(:,2),-zd,'--b'), plot(trueProfile,-zd,'-b'), hold off;
 legend('Inverse Model','','Blur of Model','Observed','True');
 title(Nf+" Layers, Final Model");
+xlim([0,MAX]);

@@ -1,7 +1,7 @@
 function layers = LOO(layers,Misfit,TOL,pTOL,tolType,p)
 % LOO (Leave-One-Out) repeatedly tries to remove the least-contributing
-% layers until the defined tolerance for misfit increase is met. Does not
-% re-optimize the layers.
+% layers until the defined tolerance for misfit increase is met.
+% ,UB,options % future update
 %
 % Jon Cooper
 %
@@ -12,6 +12,9 @@ function layers = LOO(layers,Misfit,TOL,pTOL,tolType,p)
 %   pTOL    - percent allowed change in misfit, if used
 %   tolType - 'iterative', 'total', 'absolute', 'and', or 'or'; see
 %               LayerOptimizer options for more details
+%   UB      - upper bound vector used in PSO, just need first and last
+%               elements
+%   options - PSO options
 %   p       - plots misfits if greater than 2
 
 base = Misfit(layers);
@@ -29,6 +32,7 @@ while 1 % loop condition not actually necessary; breaks inside
     end
     
     if strcmp(tolType,'iterative') % recompute the tolerance if desired
+        base = Misfit(layers);
         TOL = Misfit(layers)*(pTOL/100+1);
     end
     
@@ -37,18 +41,22 @@ while 1 % loop condition not actually necessary; breaks inside
         misfits(i) = Misfit(layers([1:i-1,i+1:Nc+i-1,Nc+i+1:end]));
     end
     if p > 2 && Nc == N % if first iteration, plot initial misfits
-        figure, plot(sort(misfits)), hold on;
+        figure, bar(misfits), hold on;
         yline(base,'--k'); yline(TOL,'--r');
-        legend('Misfit','Original Misfit','Tolerance','location','NorthWest');
+        legend('Misfits','Starting Misfit','Tolerance','location','NorthWest');
         title('Initial LOO Misfits');
+        xlabel('Layer Number'); ylabel('Misfit After Removing Layer');
+        set(gca,'FontSize',15);
     end
     
     if ~any(misfits <= TOL) % if jump in misfit is too great, exit
         if p > 2 % plot final misfits
-            figure, plot(sort(misfits)), hold on;
+            figure, bar(misfits), hold on;
             yline(base,'--k'); yline(TOL,'--r');
-            legend('Misfit','Original Misfit','Tolerance','location','NorthWest');
+            legend('Misfits','Starting Misfit','Tolerance','location','NorthWest');
             title('Final LOO Misfits');
+            xlabel('Layer Number'); ylabel('Misfit After Removing Layer');
+            set(gca,'FontSize',15);
         end
         break
     else
@@ -59,6 +67,14 @@ while 1 % loop condition not actually necessary; breaks inside
     Nc = length(layers)/2; % number of layer left
     
     if Nc == 1
+        if p > 2 % plot final misfits
+            figure, bar(misfits), hold on;
+            yline(base,'--k'); yline(TOL,'--r');
+            legend('Misfits','Starting Misfit','Tolerance','location','NorthWest');
+            title('Final LOO Misfits');
+            xlabel('Layer Number'); ylabel('Misfit After Removing Layer');
+            set(gca,'FontSize',15);
+        end
         break
     end
 end

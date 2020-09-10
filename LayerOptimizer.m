@@ -1,4 +1,4 @@
-function [layers,info] = LayerOptimizer(N,obs,kern,options)
+function [layers,info] = LayerOptimizer(obs,blur,options)
 % LayerOptimizer uses the Particle Swarm optimizer to fit a soil profile
 % model to observed data via the pointspread function kern. Requires the
 % image processing toolbox and the global optimization toolbox.
@@ -6,12 +6,12 @@ function [layers,info] = LayerOptimizer(N,obs,kern,options)
 % Jon Cooper
 %
 % Input:
-%   N       - The number of initial layers in the model.
 %   obs     - A Mx2 matrix with M soil resistance observations. The first
 %               column is the (positive) depth vector, the second contains 
 %               the observed resistances.
-%   kern    - A vector representing a discrete pointspread function, used
-%               in the context of 'blurry_data = conv(true_data,kern)'.
+%   blur    - A function handle that takes a true resistance profile and
+%               outputs a blurred resistance profile of the same
+%               dimensions.
 % Options : To be specified in name-value cell array,
 %               e.g. options = {'AOITolType','or';'LOOpTol',5;'AOIpTol',5};
 %   layers0 - A 2N column vector defining a soil layer model with N layers.
@@ -64,11 +64,11 @@ function [layers,info] = LayerOptimizer(N,obs,kern,options)
 layers0 = [];
 HybridFcn = 'fmincon';
 LOOTolType = 'iterative';
-LOOpTol = 5;
-LOOTol = 1;
-AOITolType = 'and';
-AOIpTol = 10;
-AOITol = 1;
+LOOpTol = 10;
+LOOTol = 0.02;
+AOITolType = 'iterative';
+AOIpTol = 20;
+AOITol = 0.01;
 MisfitNorm = 2;
 ConvTol = 1e-3;
 MIN = .01;
@@ -83,37 +83,41 @@ if nargin == nargin(mfilename)
   for j = 1:size(options,1), eval([options{j,1},'= options{j,2};']); end
 end
 
-if ~isempty(layers0), N = length(layers0)/2; end
+if ~isempty(layers0), N0 = length(layers0)/2; end
 
 %% Unpack variables and initialize layer model
 
-M = size(obs,1);
 zd = obs(:,1); qcMeas = obs(:,2);
 mzd = max(zd); mqc = MAX;
 zd = zd/mzd; qcMeas = qcMeas/mqc;
-psf = kern(:);
-LB = [zeros(N,1)+min(zd);zeros(N,1)+MIN];
-UB = ones(2*N,1);
 
 % define the misfit function
-mask = eye(M); n = 0; z = 0;
-mask = [zeros(M,floor(length(kern)/2)),mask,zeros(M,ceil(length(kern)/2)-1)];
-mask = diag([zeros(1,z),linspace(0,1,n),ones(1,M-n-z)].*[ones(1,M-n-z),linspace(1,0,n),zeros(1,z)])*mask;
-Misfit=@(l) norm(mask*conv(LayerModelEval(l,zd),psf)-qcMeas,MisfitNorm);
+scale = norm(ones(size(zd)),MisfitNorm); % add weighting to ensure between 0 and 1
+Misfit=@(l) norm(blur(LayerModelEval(l,zd))-qcMeas,MisfitNorm)/scale;
 
 % define the initial layer model, if not given, and set properties
-nPop = min(100,10*2*N);
-PSOoptions = optimoptions('particleswarm','SwarmSize',nPop,'HybridFcn',HybridFcn,'Display','off');
 if isempty(layers0)
-    layers0 = particleswarm(Misfit,2*N,LB,UB,PSOoptions)';
-    pos = layers0(1:N); res = layers0(N+1:end);
-    [pos,order] = sort(pos); res = res(order);
-    layers0 = [pos;res]; layers0(1) = 0;
+    pos = (qcMeas(3:end)-qcMeas(2:end-1) >= 0) & (qcMeas(1:end-2)-qcMeas(2:end-1) > 0);
+    neg = (qcMeas(3:end)-qcMeas(2:end-1) <= 0) & (qcMeas(1:end-2)-qcMeas(2:end-1) < 0);
+    loc = nonzeros((pos | neg).*zd(2:end-1)); res = nonzeros((pos | neg).*qcMeas(2:end-1));
+%     loc = loc - (zd()-zd(1))/4; % shift locations up a little % the /4 is somewhat arbitrary; will change later
+    loc = [0;loc]; res = [qcMeas(1);res];
+    layers0 = [loc;res]; clear loc
+%     nPop = min(100,10*2*N);
+%     PSOoptions = optimoptions('particleswarm','SwarmSize',nPop,'HybridFcn',HybridFcn,'Display','off');
+%     LB = [zeros(N,1)+min(zd);zeros(N,1)+MIN];
+%     UB = ones(2*N,1);
+%     layers0 = particleswarm(Misfit,2*N,LB,UB,PSOoptions)';
+%     pos = layers0(1:N); res = layers0(N+1:end);
+%     [pos,order] = sort(pos); res = res(order);
+%     layers0 = [pos;res]; layers0(1) = 0;
 else
-    pos = layers0(1:N); res = layers0(N+1:end);
+    pos = layers0(1:N0); res = layers0(N0+1:end);
     [pos,order] = sort(pos); res = res(order);
     layers0 = [min(zd)+pos/mzd;res/mqc]; layers0(1) = 0;
 end
+N0 = length(layers0)/2; N = N0;
+UB = ones(2*N,1);
 if Plt > 0, layerPlot(zd,psf,mask,layers0,qcMeas,"Initial"); end
 
 % coordinate descent for initial model
@@ -122,8 +126,13 @@ if CD
         'HessUpdate','steepdesc','MaxFunctionEvaluations',100); % backdoor gradient descent
     for j = 1:CDMaxIter
         layers = layers0;
-        for i = length(layers0):-1:2
+        for i = 2*N:-1:2 % go through resistances first, then locations, skipping location 0
             layers0(i) = fminunc(@(l) Misfit([layers0(1:(i-1));l;layers0((i+1):(2*N))]),layers0(i),CDoptions);
+            if layers0(i) > 1 % enforce bounds on both resistances and locations (both scaled to [0,1])
+                layers0(i) = 1;
+            elseif layers0(i) < 0
+                layers0(i) = 0;
+            end
         end
         if norm(layers-layers0) < 1e-2, break, end
     end
@@ -141,46 +150,69 @@ end
 
 %% Main Loop
 
+% layers = LOO(layers0,Misfit,LOOTol,LOOpTol,LOOTolType,Plt); Nc = length(layers)/2;
+% pos = layers(1:Nc); res = layers(Nc+1:end);
+% [pos,order] = sort(pos); res = res(order);
+% layers = [pos;res]; layers(1) = 0;
+% if Plt > 1, layerPlot(zd,psf,mask,layers,qcMeas,"LOO Initial"); end
+
+nPop = min(100,10*2*N);
+PSOoptions = optimoptions('particleswarm','SwarmSize',nPop,'HybridFcn',HybridFcn,'Display','off');
 iter = 0;
 layers = layers0;
 layersPrev = layers + 1;
 while iter < MaxIter && (length(layersPrev) ~= length(layers) || norm(layersPrev-layers,inf) > ConvTol)
-    layersPrev = layers; Nc = length(layers)/2;
+    layersPrev = layers;
+    
+    if iter > 0
+        layers = LOO(layers,Misfit,LOOTol,LOOpTol,LOOTolType,Plt); Nc = length(layers)/2;
+        pos = layers(1:Nc); res = layers(Nc+1:end);
+        [pos,order] = sort(pos); res = res(order);
+        layers = [pos;res]; layers(1) = 0;
+        if Plt > 1, layerPlot(zd,psf,mask,layers,qcMeas,"LOO"); end
+        
+        PSOoptions.InitialSwarmMatrix = [layers';layers'];
+        LB = [zeros(Nc,1)+min(zd); zeros(Nc,1)+MIN];
+        UB = ones(2*Nc,1);
+        layers = particleswarm(Misfit,2*Nc,LB,UB,PSOoptions)';
+        pos = layers(1:Nc); res = layers(Nc+1:end);
+        [pos,order] = sort(pos); res = res(order);
+        layers = [pos;res]; layers(1) = 0;
+        if Plt > 1, layerPlot(zd,psf,mask,layers,qcMeas,"PSO"); end
+    end
+    
+    layers = AOI(layers,Misfit,AOITol,AOIpTol,AOITolType,UB,PSOoptions,Plt);
+    if Plt > 1, layerPlot(zd,psf,mask,layers,qcMeas,"AOI"); end
+    Nc = length(layers)/2;
     
     PSOoptions.InitialSwarmMatrix = [layers';layers'];
-    layers = particleswarm(Misfit,2*Nc,LB,UB,PSOoptions)';
-    if Plt > 1, layerPlot(zd,psf,mask,layers,qcMeas,"PSO A"); end
-    
-    layers = LOO(layers,Misfit,LOOTol,LOOpTol,LOOTolType,Plt); Nc = length(layers)/2;
-    if Plt > 1, layerPlot(zd,psf,mask,layers,qcMeas,"LOO"); end
-    
-    PSOoptions.InitialSwarmMatrix = [layers';layers'];
-    LB = [zeros(Nc,1)+min(zd);zeros(Nc,1)+MIN];
-    UB = ones(2*Nc,1); % shrink if necessary
-    
+    LB = [zeros(Nc,1)+min(zd); zeros(Nc,1)+MIN];
+    UB = ones(2*Nc,1);
     layers = particleswarm(Misfit,2*Nc,LB,UB,PSOoptions)';
     pos = layers(1:Nc); res = layers(Nc+1:end);
     [pos,order] = sort(pos); res = res(order);
     layers = [pos;res]; layers(1) = 0;
-    if Plt > 1, layerPlot(zd,psf,mask,layers,qcMeas,"PSO B"); end
-    
-    layers = AOI(layers,Misfit,AOITol,AOIpTol,AOITolType,UB,PSOoptions,Plt);
-    if Plt > 1, layerPlot(zd,psf,mask,layers,qcMeas,"AOI"); end
+    if Plt > 1, layerPlot(zd,psf,mask,layers,qcMeas,"PSO"); end
     
     iter = iter+1;
 end
+layers = LOO(layers,Misfit,LOOTol,LOOpTol,LOOTolType,Plt); Nc = length(layers)/2;
+pos = layers(1:Nc); res = layers(Nc+1:end);
+[pos,order] = sort(pos); res = res(order);
+layers = [pos;res]; layers(1) = 0;
+if Plt > 1, layerPlot(zd,psf,mask,layers,qcMeas,"LOO Final"); end
 
 %% Warnings
-errorfunc = mask*conv(LayerModelEval(layers,zd),psf)-qcMeas;
-error = norm(errorfunc,MisfitNorm);
-if error > .2
-    warning("High misfit: layer(s) likely averaged");
+errorfunc = blur(LayerModelEval(layers,zd))-qcMeas;
+error = norm(errorfunc,MisfitNorm)/scale;
+if error > .001 % ARBITRARY FOR NOW
+    if error > 0.02, warning("High misfit: layer(s) likely averaged"); end
     
     % moving average, local L2 approximations
     zs = 1:length(zd);
-    pos = (errorfunc(2:end) < 0) & (errorfunc(1:end-1) >= 0);
+    posi = (errorfunc(2:end) < 0) & (errorfunc(1:end-1) >= 0);
     neg = (errorfunc(2:end) > 0) & (errorfunc(1:end-1) <= 0);
-    zs = zs(pos | neg); zs = [1;zs';length(zd)];
+    zs = zs(posi | neg); zs = [1;zs';length(zd)];
     
     for i = 1:length(zs)-2
         start = zs(i); fin = zs(i+2); width = zd(fin)-zd(start);
@@ -196,18 +228,13 @@ end
 
 
 %% Post processing
-
-layers = LOO(layers,Misfit,LOOTol,LOOpTol,LOOTolType,Plt); Nc = length(layers)/2;
-pos = layers(1:Nc); res = layers(Nc+1:end);
-[pos,order] = sort(pos); res = res(order);
-layers = [pos;res]; layers(1) = 0;
 fmisfit = Misfit(layers); imisfit = Misfit(layers0);
 if Plt > 0, layerPlot(zd,psf,mask,layers,qcMeas,"Final"); end
 layers = [(pos-min(zd))*mzd;res*mqc]; layers(1) = 0;
 pos = layers0(1:N); res = layers0(N+1:end);
 layers0 = [(pos-min(zd))*mzd;res*mqc]; layers0(1) = 0;
 
-info = struct('Nfinal',Nc,'layers0',layers0,'mask',mask,'Misfit',Misfit,...
+info = struct('Ninitial',N0,'Nfinal',Nc,'layers0',layers0,'blur',blur,...
     'InitialMisfit',imisfit,'FinalMisfit',fmisfit);
 
 
@@ -221,7 +248,10 @@ N = length(model)/2;
 t = LayerModelEval(model,zd);
 plot(t,-zd,'-r'), hold on, plot(model(N+1:2*N),-model(1:N),'or')
 plot(mask*conv(t,psf),-zd,'--r'), plot(meas,-zd,'--b');
-legend('Inverse Model','','Blur of Model','Observed');
+legend('Inverse Model','Top of Layer','Blur of Model','Observed qc');
 title(str+", "+N+" Layers");
+xlabel('$q_c$ Resistance (scaled)','interpreter','LaTeX');
+ylabel('Depth (scaled)','interpreter','LaTeX');
+set(gca,'FontSize',15);
 
 end

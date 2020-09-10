@@ -33,12 +33,14 @@ while 1 % loop condition not actually necessary; breaks inside
     end
     
     misfits = [];
-    if base <= TOL
+    if (strcmp(tolType,'and') || strcmp(tolType,'absolute')) && base <= TOL
         if p > 2 && ~isempty(misfits) % plot final misfits
-            figure, plot(misfits), hold on;
+            figure, bar(misfits), hold on;
             yline(base,'--k'); yline(TOL,'--r');
-            legend('Misfit','Original Misfit','Tolerance','location','NorthWest');
+            legend('Misfits','Starting Misfit','Tolerance','location','NorthWest');
             title('Final AOI Misfits');
+            xlabel('Layer Number'); ylabel('Misfit After Adding a Layer Below');
+            set(gca,'FontSize',15);
         end
         break
     end
@@ -71,18 +73,22 @@ while 1 % loop condition not actually necessary; breaks inside
         misfits(i) = Misfit(layersTemp);
     end
     if p > 2 && Nc == N % if first iteration, plot initial misfits
-        figure, plot(misfits), hold on;
+        figure, bar(misfits), hold on;
         yline(base,'--k'); yline(TOL,'--r');
-        legend('Misfit','Original Misfit','Tolerance','location','NorthWest');
+        legend('Misfits','Starting Misfit','Tolerance','location','NorthWest');
         title('Initial AOI Misfits');
+        xlabel('Layer Number'); ylabel('Misfit After Adding a Layer Below');
+        set(gca,'FontSize',15);
     end
     
     if all(misfits > TOL) % if jump in misfit is too small, exit
         if p > 2% plot final misfits
-            figure, plot(misfits), hold on;
+            figure, bar(misfits), hold on;
             yline(base,'--k'); yline(TOL,'--r');
-            legend('Misfit','Original Misfit','Tolerance','location','NorthWest');
+            legend('Misfits','Starting Misfit','Tolerance','location','NorthWest');
             title('Final AOI Misfits');
+            xlabel('Layer Number'); ylabel('Misfit After Adding a Layer Below');
+            set(gca,'FontSize',15);
         end
         break
     else
