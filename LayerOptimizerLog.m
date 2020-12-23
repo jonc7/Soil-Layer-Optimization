@@ -1,4 +1,4 @@
-function [layers,info] = LayerOptimizer(obs,blur,options)
+function [layers,info] = LayerOptimizerLog(obs,blur,options)
 % LayerOptimizer uses the Particle Swarm optimizer to fit a soil profile
 % model to observed data via the pointspread function kern. Requires the
 % image processing toolbox and the global optimization toolbox.
@@ -19,18 +19,7 @@ function [layers,info] = LayerOptimizer(obs,blur,options)
 %               absolute positive depth, the second N elements are the
 %               respective layer resistances.
 %   HybridFcn - Used in PSO options. ({'fmincon'}, [], PSO HybridFcn options)
-%   LOOTolType : ('iterative','total','absolute','and',{'or'})
-%           iterative - Exit LOO if misfit increases by more than LOOpTol
-%                           percent compared to the previous iteration.
-%           total - Exit LOO if misfit increases by more than LOOpTol
-%                       percent compared to the initial misfit.
-%           absolute - Exit LOO if misfit score is greater than LOOTol.
-%           and - Exit LOO if the conditions for both 'total' and
-%                   'absolute' are met.
-%           or - Exit LOO if either of the conditions for 'total' and
-%                   'absolute' are met.
-%   LOOpTol - Percent allowed change in misfit for LOO, if used. {5}
-%   LOOTol - Maximum absolute misfit score. {1}
+%   LOOTol - Minimum allowed layer thickness. {0.01}
 %   AOITolType : ('iterative','absolute',{'and'},'or')
 %           iterative - Only accept adding a new layer if it decreases the
 %                           misfit by more than AOIpTol percent, compared
@@ -60,6 +49,7 @@ function [layers,info] = LayerOptimizer(obs,blur,options)
 %   SocialWeight - SocialAdjustmentWeight for PSO. {.7}
 %   SelfWeight - SelfAdjustmentWeight for PSO. {2}
 %   MisfitTransform - Function for transforming the misfit scores. {@(x) x}
+%   parallel - boolean for whether to use parallel. {0}
 % Output:
 %   layers - a soil layer model (see layers0 description)
 %   info - a struct containing most internal parameters
@@ -67,14 +57,14 @@ function [layers,info] = LayerOptimizer(obs,blur,options)
 %% Define default options & read user-defined options
 layers0 = [];
 HybridFcn = 'fmincon';
-LOOTolType = 'iterative';
-LOOpTol = 10;
-LOOTol = 0.02;
+LayerTol = 0.01;
+ResTol = 0.1;
 AOITolType = 'iterative';
 AOIpTol = 20;
 AOITol = 0.01;
+AOIMaxAdded = 4;
 MisfitNorm = 2;
-ConvTol = 1e-3;
+ConvTol = 1e-8;
 MIN = .01;
 MAX = 10;
 Plt = 0;
@@ -83,15 +73,16 @@ CD = 1;
 CDMaxIter = 20;
 SocialWeight = .7;
 SelfWeight = 2;
-MisfitTransform = @(x) x;
+eps = 1e-6; % prevents misfit from being unbounded, keeps iterations from running away
+MisfitTransform = @(misfit) log(misfit+eps);
+parallel = 0;
 
 % rewrite default parameters if needed
 if nargin == nargin(mfilename)
   for j = 1:size(options,1), eval([options{j,1},'= options{j,2};']); end
 end
 
-% adjust the tolerances if using an objective function transform
-LOOTol = MisfitTransform(LOOTol);
+% adjust the tolerance for AOI if using an objective function transform
 AOITol = MisfitTransform(AOITol);
 
 if ~isempty(layers0), N0 = length(layers0)/2; end
@@ -102,6 +93,8 @@ if ~isempty(layers0), N0 = length(layers0)/2; end
 zd = obs(:,1); qcMeas = obs(:,2);
 mzd = max(zd); mqc = MAX;
 zd = zd/mzd; qcMeas = qcMeas/mqc;
+LayerTol = LayerTol/mzd;
+ResTol = ResTol/mqc;
 
 % define the misfit function
 scale = norm(ones(size(zd)),MisfitNorm); % add weighting to ensure between 0 and 1
@@ -121,7 +114,7 @@ else
 end
 N0 = length(layers0)/2; N = N0;
 UB = ones(2*N,1);
-if Plt > 0, layerPlot(zd,psf,mask,layers0,qcMeas,"Initial"); end
+if Plt > 0, layerPlot(zd,blur,layers0,qcMeas,"Initial"); end
 
 % coordinate descent for initial model
 if CD
@@ -148,7 +141,7 @@ if CD
     [pos,order] = sort(pos); res = res(order);
     layers0 = [pos;res];
 
-    if Plt > 0, layerPlot(zd,psf,mask,layers0,qcMeas,"Coordinate Descent"); end
+    if Plt > 0, layerPlot(zd,blur,layers0,qcMeas,"Coordinate Descent"); end
 end
 
 
@@ -161,65 +154,38 @@ PSOoptions = optimoptions('particleswarm','SwarmSize',nPop,'HybridFcn',HybridFcn
 
 % initial LOO application to help speed up main loop
 layers = layers0;
-layers = LOO(layers0,Misfit,LOOTol,LOOpTol,LOOTolType,Plt); Nc = length(layers)/2;
+layers = LOOlog(layers,@(x) exp(Misfit(x)),LayerTol,ResTol); Nc = length(layers)/2;
 pos = layers(1:Nc); res = layers(Nc+1:end);
 [pos,order] = sort(pos); res = res(order);
 layers = [pos;res]; layers(1) = 0;
-if Plt > 1, layerPlot(zd,psf,mask,layers,qcMeas,"LOO Initial"); end
+if Plt > 1, layerPlot(zd,blur,layers,qcMeas,"Initial LOO"); end
 
 % MAIN LOOP
 iter = 0;
 layersPrev = layers + 1;
-while iter < MaxIter && (length(layersPrev) ~= length(layers) || norm(layersPrev-layers,inf) > ConvTol)
+while iter < MaxIter && (abs(Misfit(layersPrev)-Misfit(layers)) > ConvTol)...
+        && (length(layersPrev) ~= length(layers) || norm(layersPrev-layers,inf) > ConvTol)
     layersPrev = layers;
     
-    if iter > 0
-        % LOO
-        layers = LOO(layers,Misfit,LOOTol,LOOpTol,LOOTolType,Plt); Nc = length(layers)/2;
-        pos = layers(1:Nc); res = layers(Nc+1:end);
-        [pos,order] = sort(pos); res = res(order);
-        layers = [pos;res]; layers(1) = 0;
-        if Plt > 1, layerPlot(zd,psf,mask,layers,qcMeas,"LOO"); end
-        
-        %PSO applied to entire model
-        PSOoptions.InitialSwarmMatrix = [layers';layers'];
-        pts = lhsdesign(PSOoptions.SwarmSize-2,2*Nc); % latin hypercube initial particle selection
-        pts(:,1:Nc) = sortrows(pts(:,1:Nc)')';
-        PSOoptions.InitialSwarmMatrix = [PSOoptions.InitialSwarmMatrix; pts];
-        LB = [zeros(Nc,1)+min(zd); zeros(Nc,1)+MIN];
-        UB = ones(2*Nc,1);
-        layers = particleswarm(Misfit,2*Nc,LB,UB,PSOoptions)';
-        pos = layers(1:Nc); res = layers(Nc+1:end);
-        [pos,order] = sort(pos); res = res(order);
-        layers = [pos;res]; layers(1) = 0;
-        if Plt > 1, layerPlot(zd,psf,mask,layers,qcMeas,"PSO"); end
-    end
-    
     % AOI
-    layers = AOI(layers,Misfit,AOITol,AOIpTol,AOITolType,UB,PSOoptions,Plt);
-    if Plt > 1, layerPlot(zd,psf,mask,layers,qcMeas,"AOI"); end
+    layers = AOILog(layers,Misfit,AOITol,AOIpTol,AOITolType,UB,AOIMaxAdded,PSOoptions,parallel,Plt);
+    if Plt > 1, layerPlot(zd,blur,layers,qcMeas,"AOI"); end
     Nc = length(layers)/2;
     
-    % PSO again
-    PSOoptions.InitialSwarmMatrix = [layers';layers'];
-    PSOoptions.OutputFcn = @saveParticles;
-    LB = [zeros(Nc,1)+min(zd); zeros(Nc,1)+MIN];
-    UB = ones(2*Nc,1);
-    layers = particleswarm(Misfit,2*Nc,LB,UB,PSOoptions)';
-    PSOoptions.OutputFcn = [];
+    % PSO applied to entire model (in blocks)
+    layers = PSOSweep(layers,5,Misfit,PSOoptions,parallel);
+    if Plt > 1, layerPlot(zd,blur,layers,qcMeas,"PSO"); end
+    
+    % LOO
+    layers = LOOlog(layers,@(x) exp(Misfit(x)),LayerTol,ResTol); Nc = length(layers)/2;
     pos = layers(1:Nc); res = layers(Nc+1:end);
     [pos,order] = sort(pos); res = res(order);
     layers = [pos;res]; layers(1) = 0;
-    if Plt > 1, layerPlot(zd,psf,mask,layers,qcMeas,"PSO"); end
+    if Plt > 1, layerPlot(zd,blur,layers,qcMeas,"LOO"); end
     
     iter = iter+1;
+    if Plt == 1, layerPlot(zd,blur,layers,qcMeas,"Step "+iter); end
 end
-% extra LOO application to clean up extra layers from last AOI
-layers = LOO(layers,Misfit,LOOTol,LOOpTol,LOOTolType,Plt); Nc = length(layers)/2;
-pos = layers(1:Nc); res = layers(Nc+1:end);
-[pos,order] = sort(pos); res = res(order);
-layers = [pos;res]; layers(1) = 0;
-if Plt > 1, layerPlot(zd,psf,mask,layers,qcMeas,"LOO Final"); end
 
 %% Warnings
 errorfunc = blur(LayerModelEval(layers,zd))-qcMeas;
@@ -251,7 +217,7 @@ end
 
 % transform back from [0,1]^2 range
 fmisfit = Misfit(layers); imisfit = Misfit(layers0);
-if Plt > 0, layerPlot(zd,psf,mask,layers,qcMeas,"Final"); end
+if Plt > 0, layerPlot(zd,blur,layers,qcMeas,"Final"); end
 layers = [(pos-min(zd))*mzd;res*mqc]; layers(1) = 0;
 pos = layers0(1:N); res = layers0(N+1:end);
 layers0 = [(pos-min(zd))*mzd;res*mqc]; layers0(1) = 0;
@@ -268,18 +234,128 @@ end
 % model - layer model
 % meas - observed data (blurred)
 % str - string for title of plot
-function layerPlot(zd,psf,mask,model,meas,str)
+function layerPlot(zd,blur,model,meas,str)
 
     figure
     N = length(model)/2;
     t = LayerModelEval(model,zd);
     plot(t,-zd,'-r'), hold on, plot(model(N+1:2*N),-model(1:N),'or')
-    plot(mask*conv(t,psf),-zd,'--r'), plot(meas,-zd,'--b');
+    plot(blur(t),-zd,'--r'), plot(meas,-zd,'--b');
     legend('Inverse Model','Top of Layer','Blur of Model','Observed qc');
     title(str+", "+N+" Layers");
     xlabel('$q_c$ Resistance (scaled)','interpreter','LaTeX');
     ylabel('Depth (scaled)','interpreter','LaTeX');
     set(gca,'FontSize',15);
+end
+
+% PSOSweep efficiently applies PSO to the entire layer model by dividing
+%   the problem into equally sized blocks of layers
+% layers - current model
+% Misfit - misfit function
+% N - size of the blocks (default: 5 layers at a time)
+% PSOoptions - optimoptions for PSO
+% parallel - boolean for whether to use parallel
+function layers = PSOSweep(layers,Misfit,N,PSOoptions,parallel)
+    
+    if N > length(layers)/2
+        N = length(layers)/2;
+    end
+    if N == 0
+        return
+    end
+    
+    Nc = length(layers)/2;
+    % note: nonparallel updates the model within each iteration, parallel
+    %   does each block w.r.t. the base model only and aggregates results
+    if parallel
+        offset = ceil(rand()*(N-1));
+        layers_new = zeros(floor((Nc-offset)/N),2*N);
+        
+        % randomly divide up into blocks of N
+        parfor i = 1:floor((Nc-offset)/N)
+            % set bounds for PSO
+            LB = [zeros(N,1);zeros(N,1)];
+            UB = [ones(N,1);ones(N,1)];
+            if i-N > 0
+               LB(1:N) = layers(i);
+            end
+            if Nc-(i+N-1) > 0
+               UB(1:N) = layers(i+N);
+            end
+            
+            % PSO
+            PSOoptions_copy = optimoptions('particleswarm',PSOoptions);
+            PSOoptions_copy.InitialSwarmMatrix = [layers(i:i+N-1)',layers(Nc+i:Nc+i+N-1)';...
+                layers(i:i+N-1)',layers(Nc+i:Nc+i+N-1)'];
+            objfcn = @(x) Misfit(replaceLayers(layers,i,x));
+            temp = particleswarm(objfcn,2*N,LB,UB,PSOoptions_copy)';
+            layers_new(i,:) = temp;
+        end
+        
+        % replace appropriate layers
+        for i = 1:floor((Nc-offset)/N)
+            layers = replaceLayers(layers,i,layers_new(i,:));
+        end
+        pos = layers(1:Nc); res = layers(Nc+1:end);
+        [pos,order] = sort(pos); res = res(order);
+        layers = [pos;res]; layers(1) = 0;
+    else
+        % randomly divide up into blocks of N
+        for i = ceil(rand()*(N-1)):N:Nc-N+1
+            % set bounds for PSO
+            LB = [zeros(N,1);zeros(N,1)];
+            UB = [ones(N,1);ones(N,1)];
+            if i-N > 0
+               LB(1:N) = layers(i);
+            end
+            if Nc-(i+N-1) > 0
+               UB(1:N) = layers(i+N);
+            end
+            
+            % PSO
+            PSOoptions.InitialSwarmMatrix = [layers(i:i+N-1)',layers(Nc+i:Nc+i+N-1)';layers(i:i+N-1)',layers(Nc+i:Nc+i+N-1)'];
+            objfcn = @(x) Misfit(replaceLayers(layers,i,x));
+            temp = particleswarm(objfcn,2*N,LB,UB,PSOoptions)';
+            
+            % replace appropriate block of layers
+            layers = replaceLayers(layers,i,temp);
+            pos = layers(1:Nc); res = layers(Nc+1:end);
+            [pos,order] = sort(pos); res = res(order);
+            layers = [pos;res]; layers(1) = 0;
+        end
+    end
+end
+
+% replaceLayers takes two different layer models and substitutes one model
+%   into the other starting at a specified index. Warns if the secondary
+%   layer model is too large.
+% model - "base" model, should be larger
+% N - first index where the layers should be replaced
+% layers - secondary model
+function layerstemp = replaceLayers(model,N,layers)
+    Nc = length(model)/2; Ni = length(layers)/2;
+    if Ni > Nc-N+1
+        warning("Secondary model too large in replaceLayers. Extending the length of the model.");
+        new_length = Ni-Nc+N-1;
+        new_model = zeros(length(model)+2*new_length,1);
+        new_model(1:Nc) = model(1:Nc);
+        new_model(Nc+1+new_length:2*Nc+new_length) = model(Nc+1:end);
+        model = new_model;
+        Nc = Nc+new_length;
+    end
+    
+    % if the same size, just output secondary model
+    if length(layers) >= length(model)
+        pos = layers(1:Ni); res = layers(Ni+1:end);
+        [pos,order] = sort(pos); res = res(order);
+        layerstemp = [pos;res];
+        return
+    end
+    % otherwise, replace layers
+    pos = model(1:Nc); res = model(Nc+1:end);
+    pos(N:N+Ni-1) = layers(1:Ni); res(N:N+Ni-1) = layers(Ni+1:end);
+    [pos,order] = sort(pos); res = res(order);
+    layerstemp = [pos;res];
 end
 
 % saveParticles is a bit of a hackey method for scraping the final state of

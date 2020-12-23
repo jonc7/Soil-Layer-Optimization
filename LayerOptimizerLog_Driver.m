@@ -1,5 +1,5 @@
-% LayerOptimizer_Driver
-% example usage of LayerOptimizer.m
+% LayerOptimizerLog_Driver
+% example usage of LayerOptimizerLog.m
 %
 % Jon Cooper
 
@@ -28,7 +28,7 @@ blur = @(layers) mask*conv(layers,kern);
 obs(:,2) = blur(trueProfile);
 
 %% Optimize
-[layers,info] = LayerOptimizer(obs,blur,options);
+[layers,info] = LayerOptimizerLog(obs,blur,options);
 
 %% Plot
 zd = CPT40True.zd;

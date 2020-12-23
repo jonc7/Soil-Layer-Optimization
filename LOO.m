@@ -1,7 +1,6 @@
 function layers = LOO(layers,Misfit,TOL,pTOL,tolType,p)
 % LOO (Leave-One-Out) repeatedly tries to remove the least-contributing
 % layers until the defined tolerance for misfit increase is met.
-% ,UB,options % future update
 %
 % Jon Cooper
 %

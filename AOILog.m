@@ -1,5 +1,5 @@
-function layers = AOI(layers,Misfit,TOL,pTOL,tolType,UB,options,p)
-% AOI (Add-One-In) repeatedly tries to add extra layers between the
+function layers = AOILog(layers,Misfit,TOL,pTOL,tolType,UB,MaxAdded,options,parallel,p)
+% AOILog (Add-One-In) repeatedly tries to add extra layers between the
 % existing ones unless the decrease in misfit is only marginal (i.e. the
 % tolerance is a lower bound). Each added layer IS optimized, and this is
 % just a 2-variable optimization keeping all else fixed.
@@ -16,10 +16,11 @@ function layers = AOI(layers,Misfit,TOL,pTOL,tolType,UB,options,p)
 %   UB      - upper bound vector used in PSO, just need first and last
 %               elements
 %   options - PSO options
+%   parallel- boolean for whether to use parallel
 %   p       - plots misfits if greater than 2
 
 bottom = UB(1); maxRes = UB(end);
-iter = 0;
+iter = 0; added = 0;
 
 N = length(layers)/2; Nc = N;% number of current layers
 while 1 % loop condition not actually necessary; breaks inside
@@ -52,28 +53,53 @@ while 1 % loop condition not actually necessary; breaks inside
     layersTemp(Nc+3:end) = layers(Nc+1:end);
     misfits = zeros(Nc,1);
     extraLayers = zeros(Nc,2);
-    for i = 1:Nc
-        if i == Nc % insert below the bottom layer
-            if layers(Nc) == bottom % if bottom layer is at the very bottom already (unlikely)
-                misfits(i) = base;
-                continue
+    if parallel
+        layer_bottom = layers(Nc);
+        parfor i = 1:Nc
+            if i == Nc % insert below the bottom layer
+                if layer_bottom == bottom % if bottom layer is at the very bottom already (unlikely)
+                    misfits(i) = base;
+                    continue
+                end
+                extraLayer = [(layers(Nc)+bottom)/2,layers(end)];
+                LB = [layers(Nc);0]; UB = [bottom;maxRes];
+                extraLayern = [layers(i)+rand()*(bottom-layers(i)),rand()*maxRes]; % with noise
+
+            else % insert between 2 layers
+                extraLayer = [(layers(i)+layers(i+1))/2,(layers(Nc+i)+layers(Nc+i+1))/2];
+                LB = [layers(i);0]; UB = [layers(i+1);maxRes];
+                extraLayern = [layers(i)+rand()*(layers(i+1)-layers(i)),rand()*maxRes];
             end
-            extraLayer = [(layers(Nc)+bottom)/2,layers(end)];
-            LB = [layers(Nc);0]; UB = [bottom;maxRes];
-            extraLayern = [layers(i)+rand()*(bottom-layers(i)),rand()*maxRes]; % with noise
-            
-        else % insert between 2 layers
-            extraLayer = [(layers(i)+layers(i+1))/2,(layers(Nc+i)+layers(Nc+i+1))/2];
-            LB = [layers(i);0]; UB = [layers(i+1);maxRes];
-            extraLayern = [layers(i)+rand()*(layers(i+1)-layers(i)),rand()*maxRes];
+            options_copy = optimoptions('particleswarm',options);
+            options_copy.InitialSwarmMatrix = [extraLayer;extraLayern];
+            extraLayer = particleswarm(@(l) Misfit(imputeLayer(l,layersTemp)),2,LB,UB,options_copy);
+            extraLayers(i,:) = extraLayer(:);
+            misfits(i) = Misfit(imputeLayer(extraLayer,layersTemp));
         end
-        options.InitialSwarmMatrix = [extraLayer;extraLayern];
-        extraLayer = particleswarm(@(l) Misfit(imputeLayer(l,layersTemp)),2,LB,UB,options);
-        
-        layersTemp = imputeLayer(extraLayer,layersTemp);
-        extraLayers(i,1) = extraLayer(1);
-        extraLayers(i,2) = extraLayer(2);
-        misfits(i) = Misfit(layersTemp);
+    else
+        for i = 1:Nc
+            if i == Nc % insert below the bottom layer
+                if layers(Nc) == bottom % if bottom layer is at the very bottom already (unlikely)
+                    misfits(i) = base;
+                    continue
+                end
+                extraLayer = [(layers(Nc)+bottom)/2,layers(end)];
+                LB = [layers(Nc);0]; UB = [bottom;maxRes];
+                extraLayern = [layers(i)+rand()*(bottom-layers(i)),rand()*maxRes]; % with noise
+
+            else % insert between 2 layers
+                extraLayer = [(layers(i)+layers(i+1))/2,(layers(Nc+i)+layers(Nc+i+1))/2];
+                LB = [layers(i);0]; UB = [layers(i+1);maxRes];
+                extraLayern = [layers(i)+rand()*(layers(i+1)-layers(i)),rand()*maxRes];
+            end
+            options.InitialSwarmMatrix = [extraLayer;extraLayern];
+            extraLayer = particleswarm(@(l) Misfit(imputeLayer(l,layersTemp)),2,LB,UB,options);
+
+            layersTemp = imputeLayer(extraLayer,layersTemp);
+            extraLayers(i,1) = extraLayer(1);
+            extraLayers(i,2) = extraLayer(2);
+            misfits(i) = Misfit(layersTemp);
+        end
     end
     if p > 2 && Nc == N % if first iteration, plot initial misfits
         figure, bar(misfits), hold on;
@@ -102,10 +128,13 @@ while 1 % loop condition not actually necessary; breaks inside
         pos = layers(1:Nc); res = layers(Nc+1:end);
         [pos,order] = sort(pos); res = res(order);
         layers = [pos;res]; layers(1) = 0;
+        
+        added = added+1;
     end
     
-    iter = iter+1;
-    if iter > 0, break, end
+    if added > MaxAdded
+        break
+    end
 end
 end
 
