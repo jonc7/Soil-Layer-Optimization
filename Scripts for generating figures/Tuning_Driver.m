@@ -7,12 +7,12 @@ set(0, 'DefaultLineLineWidth', 2);
 rng(0);
 
 %% Load dataset
-MODEL = 8; CPT = 3; %9;3 for hard
+MODEL = 4; CPT = 2; %9;3 for hard
 % DATA = 7; SHEET = 1;
 % load('CPT40True.mat');
 % obs = [CPT40True.zd,CPT40True.qcMeas]; % observed soil resistances
 % trueProfile = CPT40True.qcTrue; % true resistance profile
-MAX = 120; MIN = .01;
+MAX = 60; MIN = .01;
 
 % Setup the Import Options
 opts = spreadsheetImportOptions("NumVariables", 2);
@@ -143,220 +143,18 @@ subplot(1,2,1);
 t0 = LayerModelEval(layers0,zd);
 plot(t0,-zd,'-r'), hold on, plot(layers0(N0+1:2*N0),-layers0(1:N0),'or'), plot(blur(t0),-zd,'--r');
 plot(obs(:,2),-zd,'--b'), plot(qcTrue,-zd,'-b'), hold off;
-legend('Inverse Model','Top of Layer','Blur of Model','Observed','True','location','southwest');
-title("Initial Model");
-ylabel('Depth (m)','interpreter','LaTeX'); xlabel('$q_c$ Resistance (MPa)','interpreter','LaTeX');
+legend('q_c^{inv}','Top of Layer','d^{sim}(q_c^{inv})','d^{meas}','q_c^{true}','location','southwest');
+title("Initial Guess");
+ylabel('Depth (m)','interpreter','LaTeX'); xlabel('$q_{c1n}$ Resistance','interpreter','LaTeX');
 xlim([0,MAX]); ylim([-max(zd),0]);
 set(gca,'FontSize',12);
 subplot(1,2,2);
 t = LayerModelEval(layers,zd);
 plot(t,-zd,'-r'), hold on, plot(layers(Nf+1:2*Nf),-layers(1:Nf),'or'), plot(blur(t),-zd,'--r');
 plot(obs(:,2),-zd,'--b'), plot(qcTrue,-zd,'-b'), hold off;
-legend('Inverse Model','Top of Layer','Blur of Model','Observed','True','location','southwest');
-title("Final Model");
-ylabel('Depth (m)','interpreter','LaTeX'); xlabel('$q_c$ Resistance (MPa)','interpreter','LaTeX');
+legend('q_c^{inv}','Top of Layer','d^{sim}(q_c^{inv})','d^{meas}','q_c^{true}','location','southwest');
+title("Log Misfit");
+ylabel('Depth (m)','interpreter','LaTeX'); xlabel('$q_{c1n}$ Resistance','interpreter','LaTeX');
 xlim([0,MAX]); ylim([-max(zd),0]);
 set(gca,'FontSize',12);
 
-
-
-%% UQ (not for log model)
-load('FinalSwarm.mat');
-pos = swarm(:,1:size(swarm,2)/2); res = swarm(:,size(swarm,2)/2+1:end);
-[~,i] = min(swarmfvals); z0 = swarm(i,1);
-swarm = [max(zd)*(pos-z0)/(1-z0),res*MAX];
-swarm_old = swarm;
-
-top_perc = 80;
-cut = quantile(swarmfvals,top_perc/100);
-swarm = swarm(swarmfvals <= cut,:);
-
-figure,
-plot(qcTrue,-zd,'-b'), hold on;
-for i = 1:size(swarm,1)
-    t = LayerModelEval(swarm(i,:),zd);
-    plot(t,-zd,'-r')
-end
-plot(LayerModelEval(layers,zd),-zd,'--y'); ylim([-max(zd),0]);
-title("Top "+top_perc+"% of Models");
-
-%% mean + std analysis
-smean = SwarmStat(zd,best_swarm,@mean);
-sstd = SwarmStat(zd,best_swarm,@std);
-smin = SwarmStat(zd,best_swarm,@min);
-smax = SwarmStat(zd,best_swarm,@max);
-stdupper = smean+sstd; stdupper(stdupper > MAX) = MAX;
-stdlower = smean-sstd; stdlower(stdlower < MIN) = MIN;
-
-figure,
-subplot(1,2,1)
-plot(qcTrue,-zd,'-b'), hold on;
-X = [stdlower;flipud(stdupper)];
-Y = [-zd;flipud(-zd)];
-hfill = fill(X,Y,.5*[1 1 1]);
-hfill.FaceAlpha = .25;
-plot(smean,-zd,'-r')
-plot(LayerModelEval(layers,zd),-zd,'--y');
-plot(smin,-zd,'--k'), plot(smax,-zd,'--k');
-legend('true','std','mean','best','min/max');
-title('True Profile'); ylim([-max(zd),0]);
-
-subplot(1,2,2)
-plot(obs(:,2),-zd,'-b'), hold on;
-X = [blur(stdlower);flipud(blur(stdupper))];
-Y = [-zd;flipud(-zd)];
-hfill = fill(X,Y,.5*[1 1 1]);
-hfill.FaceAlpha = .25;
-plot(blur(smean),-zd,'-r')
-plot(blur(LayerModelEval(layers,zd)),-zd,'--y');
-plot(blur(smin),-zd,'--k'), plot(blur(smax),-zd,'--k');
-legend('observed','std','mean','best','min/max');
-title('Blurred Profile'); ylim([-max(zd),0]);
-
-%% quantile analysis
-s20 = SwarmStat(zd,swarm,@(d) quantile(d,.1));
-s40 = SwarmStat(zd,swarm,@(d) quantile(d,.2));
-s60 = SwarmStat(zd,swarm,@(d) quantile(d,.8));
-s80 = SwarmStat(zd,swarm,@(d) quantile(d,.9));
-smedian = SwarmStat(zd,swarm,@median);
-
-figure,
-subplot(1,2,1)
-plot(qcTrue,-zd,'-b'), hold on;
-X = [s40;flipud(s60)];
-Y = [-zd;flipud(-zd)];
-hfill = fill(X,Y,.5*[1 1 1]);
-hfill.FaceAlpha = .25;
-plot(s20,-zd,'-g');
-plot(s80,-zd,'-m');
-plot(smedian,-zd,'-r')
-plot(LayerModelEval(layers,zd),-zd,'--y');
-plot(smin,-zd,'--k'), plot(smax,-zd,'--k');
-legend('true','middle 60%','10th %',' 90th %','median','best','min/max');
-title('True Profile'); ylim([-max(zd),0]);
-
-
-subplot(1,2,2)
-plot(obs(:,2),-zd,'-b'), hold on;
-X = [blur(s40);flipud(blur(s60))];
-Y = [-zd;flipud(-zd)];
-hfill = fill(X,Y,.5*[1 1 1]);
-hfill.FaceAlpha = .25;
-plot(blur(s20),-zd,'-g');
-plot(blur(s80),-zd,'-m');
-plot(blur(smedian),-zd,'-r')
-plot(blur(LayerModelEval(layers,zd)),-zd,'--y');
-plot(blur(smin),-zd,'--k'), plot(blur(smax),-zd,'--k');
-legend('observed','middle 60%','10th %',' 90th %','median','best','min/max');
-title('Blurred Profile'); ylim([-max(zd),0]);
-
-
-%% Best models in each sub-region
-%blur all models
-swarm_blurs = zeros(size(swarm_old,1),length(zd));
-for i = 1:size(swarm_old,1)
-    swarm_blurs(i,:) = blur(LayerModelEval(swarm_old(i,:),zd));
-end
-
-%split into sub-regions
-ddz = floor(length(zd)/10); % 10 is the number of regions
-top_perc2 = 60;
-
-best = zeros(floor(length(zd)/ddz),floor(top_perc2/100*size(swarm_old,1)));
-for i = 1:floor(length(zd)/ddz)
-    misfits = zeros(size(swarm_old,1),1);
-    for j = 1:length(misfits)
-        misfits(j) = norm(qcMeas(1+(i-1)*ddz:i*ddz)-swarm_blurs(j,1+(i-1)*ddz:i*ddz)',2);
-    end
-    model_nums = 1:size(swarm_old,1);
-    [misfits,s] = sort(misfits); model_nums = model_nums(s)';
-    cut = quantile(misfits,top_perc2/100);
-    model_nums = nonzeros(model_nums.*(misfits <= cut));
-    best(i,:) = model_nums;
-end
-
-%% plot individual region
-region = 4; % region 4/10
-swarm = swarm_old(best(region,:),:);
-
-figure, subplot(1,2,1)
-plot(qcTrue,-zd,'-b'), hold on;
-for i = 1:size(swarm,1)
-    t = LayerModelEval(swarm(i,:),zd);
-    plot(t,-zd,'-r')
-end
-t = LayerModelEval(layers,zd);
-plot(t,-zd,'--y')
-% legend('Inverse Model','Top of Layer','Blur of Model','Observed','True','location','southwest');
-title("Region "+region+"/"+size(best,1)+", True");
-ylabel('Depth (m)','interpreter','LaTeX'); xlabel('$q_c$ Resistance (MPa)','interpreter','LaTeX');
-plot([0,0,MAX,MAX],-[zd(1+(region-1)*ddz),zd(region*ddz),zd(1+(region-1)*ddz),zd(region*ddz)],'dk');
-xlim([0,MAX]); ylim([-max(zd),0]);
-set(gca,'FontSize',12);
-
-subplot(1,2,2)
-plot(qcMeas,-zd,'-b'), hold on;
-for i = 1:size(swarm,1)
-    plot(swarm_blurs(best(region,i),:),-zd,'-r')
-end
-plot(blur(t),-zd,'--y')
-% legend('Inverse Model','Top of Layer','Blur of Model','Observed','True','location','southwest');
-title("Region "+region+"/"+size(best,1)+", Blur");
-ylabel('Depth (m)','interpreter','LaTeX'); xlabel('$q_c$ Resistance (MPa)','interpreter','LaTeX');
-plot([0,0,MAX,MAX],-[zd(1+(region-1)*ddz),zd(region*ddz),zd(1+(region-1)*ddz),zd(region*ddz)],'dk');
-xlim([0,MAX]); ylim([-max(zd),0]);
-set(gca,'FontSize',12);
-
-
-%% function for swarm statistics computations
-function stat = SwarmStat(zd,swarm,fcn)
-    
-    if iscell(swarm)
-        stat = zeros(size(zd));
-        pos = {}; res = {};
-        for i = 1:length(swarm)
-            pos = [pos,swarm{i}(1:length(swarm{i})/2)];
-            res = [res,swarm{i}(length(swarm{i})/2+1:end)];
-        end
-        pts = zeros(1,length(swarm));
-        for zind = 1:length(zd)
-            z = zd(zind);
-            for j = 1:length(swarm)
-                try
-                    pointer = find(pos{j} < z,1,'last');
-                catch
-                    pointer = 1;
-                end
-                pts(j) = res{j}(pointer);
-            end
-            stat(zind) = fcn(pts);
-        end
-    else
-        pointers = zeros(1,size(swarm,1));
-        stat = zeros(size(zd));
-        pos = swarm(:,1:size(swarm,2)/2); res = swarm(:,size(swarm,2)/2+1:end);
-        for zind = 1:length(zd)
-            z = zd(zind);
-            for j = 1:length(pointers) % update pointers
-                try
-                    pointers(j) = find(pos(j,:) < z,1,'last');
-                catch
-                    pointers(j) = 1;
-                end
-            end
-            pt = sub2ind(size(res),1:length(pointers),pointers); % convert to linear indexing
-            stat(zind) = fcn(res(pt));
-        end
-    end
-end
-
-% generating a layer model FROM A PEICEWISE CONSTANT FUNCTION
-function layers = ForcedModel(zd,profile)
-    layers = [zd(1),profile(1)];
-    for i = 2:length(zd)
-        if profile(i) ~= profile(i-1)
-            layers = [layers;zd(i),profile(i)];
-        end
-    end
-    layers = [layers(:,1);layers(:,2)];
-end

@@ -1,7 +1,8 @@
 function [layers,info] = LayerOptimizerLog(obs,blur,options)
 % LayerOptimizer uses the Particle Swarm optimizer to fit a soil profile
 % model to observed data via the pointspread function kern. Requires the
-% image processing toolbox and the global optimization toolbox.
+% image processing toolbox and the global optimization toolbox. Note that
+% "layers" in this program is equivalent to "m" in Cooper et al. (2021).
 % 
 % Jon Cooper
 %

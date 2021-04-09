@@ -72,9 +72,9 @@ figure
 t0 = LayerModelEval(layers0,zd);
 plot(t0,-zd,'-r'), hold on, plot(layers0(N+1:2*N),-layers0(1:N),'or'), plot(mask*conv(t0,kern),-zd,'--r');
 plot(obs(:,2),-zd,'--b'), plot(qcTrue,-zd,'-b'), hold off;
-legend('Inverse Model','Top of Layer','Blur of Model','Observed qc','True qc');
-title(N+" Layers, Initial Model");
-xlabel('$q_c$ Resistance (MPa)','interpreter','LaTeX');
+legend('q_c^{inv}','Top of Layer','d^{sim}(q_c^{inv})','d^{meas}','q_c^{true}');
+title("Initial Guess");
+xlabel('$q_{c1n}$ Resistance','interpreter','LaTeX');
 ylabel('Depth (m)','interpreter','LaTeX');
 set(gca,'FontSize',12);
 % subplot(1,2,2);
@@ -82,8 +82,8 @@ figure
 t = LayerModelEval(layers,zd);
 plot(t,-zd,'-r'), hold on, plot(layers(Nf+1:2*Nf),-layers(1:Nf),'or'), plot(mask*conv(t,kern),-zd,'--r');
 plot(obs(:,2),-zd,'--b'), plot(qcTrue,-zd,'-b'), hold off;
-legend('Inverse Model','Top of Layer','Blur of Model','Observed qc','True qc');
-title(Nf+" Layers, Final Model");
-xlabel('$q_c$ Resistance (MPa)','interpreter','LaTeX');
+legend('q_c^{inv}','Top of Layer','d^{sim}(q_c^{inv})','d^{meas}','q_c^{true}');
+title("Standard Misfit");
+xlabel('$q_{c1n}$ Resistance','interpreter','LaTeX');
 ylabel('Depth (m)','interpreter','LaTeX');
 set(gca,'FontSize',12);
