@@ -62,7 +62,7 @@ N = length(model)/2;
 t = LayerModelEval(model,zd);
 plot(t,-zd,'-r'), hold on, plot(model(N+1:2*N),-model(1:N),'or')
 plot(blur(t),-zd,'--r'), plot(meas,-zd,'--b');
-legend('Inverse Model','Top of Layer','Blur of Model','Observed qc');
+legend('$q_c$','Top of Layer','$\tilde{q_c}^{sim}$','$\tilde{q_c}^{meas}$','interpreter','latex');
 title(str+", "+N+" Layers");
 xlabel('$q_c$ Resistance (scaled)','interpreter','LaTeX');
 ylabel('Depth (scaled)','interpreter','LaTeX');
