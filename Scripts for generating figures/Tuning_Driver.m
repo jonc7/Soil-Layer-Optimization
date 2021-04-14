@@ -7,12 +7,12 @@ set(0, 'DefaultLineLineWidth', 2);
 rng(0);
 
 %% Load dataset
-MODEL = 4; CPT = 2; %9;3 for hard
+MODEL = 9; CPT = 3; %9;3 for hard
 % DATA = 7; SHEET = 1;
 % load('CPT40True.mat');
 % obs = [CPT40True.zd,CPT40True.qcMeas]; % observed soil resistances
 % trueProfile = CPT40True.qcTrue; % true resistance profile
-MAX = 60; MIN = .01;
+MAX = 90; MIN = .01;
 
 % Setup the Import Options
 opts = spreadsheetImportOptions("NumVariables", 2);
@@ -23,7 +23,7 @@ opts.SelectedVariableNames = ["A", "B"];
 opts.VariableTypes = ["double", "double"];
 
 % Import the data
-SoilModel = readtable("C:\Users\retin\Documents\Thin Layer Inversion\cpt-data-Netherlands\TrueData_GoodMatches.xlsx", opts, "UseExcel", false);
+SoilModel = readtable(".\cpt-data-Netherlands\TrueData_GoodMatches.xlsx", opts, "UseExcel", false);
 SoilModel = SoilModel{:,:};
 zdm = SoilModel(:,1); qcMeas = SoilModel(:,2);
 zdm = zdm(~isnan(qcMeas)); qcMeas = qcMeas(~isnan(qcMeas));
@@ -36,7 +36,7 @@ opts.DataRange = "G4:H700";
 opts.VariableNames = ["G", "H"];
 opts.SelectedVariableNames = ["G", "H"];
 opts.VariableTypes = ["double", "double"];
-SoilModel = readtable("C:\Users\retin\Documents\Thin Layer Inversion\cpt-data-Netherlands\TrueData_GoodMatches.xlsx", opts, "UseExcel", false);
+SoilModel = readtable(".\cpt-data-Netherlands\TrueData_GoodMatches.xlsx", opts, "UseExcel", false);
 SoilModel = SoilModel{:,:};
 zdt = SoilModel(:,1); qcTrue = SoilModel(:,2);
 zdt = zdt(~isnan(qcTrue)); qcTrue = qcTrue(~isnan(qcTrue));
@@ -45,13 +45,13 @@ zdt = zdt(~isnan(zdt)); qcTrue = qcTrue(~isnan(zdt));
 [zdt,IA,~] = unique(zdt); qcTrue = qcTrue(IA);
 
 % Interpolate to match length of measured data & sampling frequency
-if length(zdm) > length(zdt)
-    M = length(zdm);
-    zd = linspace(min(zdm),max(zdm),M)';
-else
+% if length(zdm) > length(zdt)
+%     M = length(zdm);
+%     zd = linspace(min(zdm),max(zdm),M)';
+% else
     M = length(zdt);
     zd = linspace(min(zdt),max(zdt),M)';
-end
+% end
 
 qcTrue = interp1(zdt,qcTrue,zd,'linear','extrap'); %zd = zd(~isnan(qcMeas)); qcTrue = qcTrue(~isnan(qcTrue));
 qcMeas = interp1(zdm,qcMeas,zd,'linear','extrap'); %qcMeas = qcMeas(~isnan(qcMeas));
@@ -59,8 +59,10 @@ qcMeas = interp1(zdm,qcMeas,zd,'linear','extrap'); %qcMeas = qcMeas(~isnan(qcMea
 obs = [zd,qcMeas];
 
 trunct = 50; truncb = 0;
+z_offset = abs(zd(1)-zd(trunct));
 obs = obs(trunct:end-truncb,:); zd = zd(trunct:end-truncb,:); qcTrue = qcTrue(trunct:end-truncb); %qcMeas = qcMeas(50:end-50);
 zd = zd-min(zd);
+
 
 % Clear temporary variables
 clear opts SoilModel IA zdt zdtt zdm
@@ -128,7 +130,7 @@ obs(:,2) = qcMeas;
 options = {'MaxIter',4;'MIN',.04;'MAX',MAX;'Plt',0;'parallel',0};%;'layers0',layers0};
 tic; [layers,info] = LayerOptimizerLog(obs,blur,options);
 
-%% Plot
+%% Postprocessing
 layers0 = info.layers0;
 N0 = info.Ninitial;
 Nf = info.Nfinal;
@@ -138,6 +140,11 @@ FM = info.FinalMisfit;
 fprintf('Initial Misfit: %f\n',IM);
 fprintf('Final Misfit: %f\n',FM);
 
+layers0(1:N0) = layers0(1:N0)+z_offset;
+layers(1:Nf) = layers(1:Nf)+z_offset;
+zd = zd+z_offset;
+
+%% Plot
 figure
 subplot(1,2,1);
 t0 = LayerModelEval(layers0,zd);
@@ -157,4 +164,5 @@ title('Final $q_c$','interpreter','latex');
 ylabel('Depth (m)','interpreter','LaTeX'); xlabel('$q_{c1n}$ Resistance','interpreter','LaTeX');
 xlim([0,MAX]); ylim([-max(zd),0]);
 set(gca,'FontSize',12);
+
 

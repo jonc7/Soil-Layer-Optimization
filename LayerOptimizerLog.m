@@ -174,7 +174,7 @@ while iter < MaxIter && (abs(Misfit(layersPrev)-Misfit(layers)) > ConvTol)...
     Nc = length(layers)/2;
     
     % PSO applied to entire model (in blocks)
-    layers = PSOSweep(layers,5,Misfit,PSOoptions,parallel);
+    layers = PSOSweep(layers,Misfit,5,PSOoptions,parallel);
     if Plt > 1, layerPlot(zd,blur,layers,qcMeas,"PSO"); end
     
     % LOO
